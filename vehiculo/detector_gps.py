@@ -11,10 +11,21 @@ import sqlite3
 import base64
 import requests
 import argparse
+import math
 from pathlib import Path
 from datetime import datetime
 from ultralytics import YOLO
 from huggingface_hub import hf_hub_download
+
+def haversine_m(lat1, lon1, lat2, lon2) -> float:
+    """Distancia en metros entre dos coordenadas GPS."""
+    R = 6_371_000
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+RADIO_DEDUP_LOCAL_M = 12.0   # metros — mismo bache entre corridas
 
 # ── Importar lector GPS ──────────────────────────────────────────
 import sys
@@ -41,7 +52,7 @@ SERVIDOR_URL        = "http://localhost:8000"   # cambiar por IP del servidor
 
 # API key del vehículo — se obtiene al registrar el dispositivo en el servidor
 # Ejecutar una vez: POST /api/dispositivos  →  copiar api_key aquí
-DEVICE_API_KEY      = "80dae2e278e2aadbf660531c53f085468975a08432762c702993c2c38b8151d7"
+DEVICE_API_KEY      = "41c89efe7bd85ff25d6df4ecf49a159538a8cb5368f3c2438fa3f09b1c054383"
 
 # GPS: "simulador" para pruebas, "real" con hardware conectado
 GPS_MODO            = "simulador"
@@ -137,22 +148,20 @@ def guardar_bache(conn: sqlite3.Connection, coord: CoordenadaGPS,
     foto = FOTOS_DIR / f"bache_{ts}.jpg"
     cv2.imwrite(str(foto), recorte)
 
-    # ── Foto panorama (frame completo con bache marcado) ─────────
-    panorama = frame.copy()
-    cv2.rectangle(panorama, (x1, y1), (x2, y2), color, 3)
-    # Flecha apuntando al bache desde arriba
-    cx, cy = (x1 + x2) // 2, y1
-    cv2.arrowedLine(panorama, (cx, max(0, cy - 60)), (cx, cy),
-                    color, 3, tipLength=0.3)
-    label = f"BACHE {severidad.upper()} {confianza:.0%}"
-    (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
-    lx = max(0, cx - tw // 2)
-    ly = max(th + 4, cy - 68)
-    cv2.rectangle(panorama, (lx - 4, ly - th - 4), (lx + tw + 4, ly + 4), color, -1)
-    cv2.putText(panorama, label, (lx, ly),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-    foto_panorama = FOTOS_DIR / f"bache_{ts}_panorama.jpg"
-    cv2.imwrite(str(foto_panorama), panorama)
+    # ── Foto panorama (frame completo con bache marcado) ── DESACTIVADO TEMPORALMENTE
+    # panorama = frame.copy()
+    # cv2.rectangle(panorama, (x1, y1), (x2, y2), color, 3)
+    # cx_p, cy_p = (x1 + x2) // 2, y1
+    # cv2.arrowedLine(panorama, (cx_p, max(0, cy_p - 60)), (cx_p, cy_p), color, 3, tipLength=0.3)
+    # label = f"BACHE {severidad.upper()} {confianza:.0%}"
+    # (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
+    # lx = max(0, cx_p - tw // 2)
+    # ly = max(th + 4, cy_p - 68)
+    # cv2.rectangle(panorama, (lx-4, ly-th-4), (lx+tw+4, ly+4), color, -1)
+    # cv2.putText(panorama, label, (lx, ly), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
+    # foto_panorama = FOTOS_DIR / f"bache_{ts}_panorama.jpg"
+    # cv2.imwrite(str(foto_panorama), panorama)
+    foto_panorama = None
 
     cur = conn.execute("""
         INSERT INTO baches
@@ -164,10 +173,11 @@ def guardar_bache(conn: sqlite3.Connection, coord: CoordenadaGPS,
         coord.latitud, coord.longitud, coord.altitud,
         coord.velocidad, coord.precision,
         confianza, severidad, ancho, alto,
-        str(foto), str(foto_panorama), datetime.now().isoformat(), turno_id
+        str(foto), str(foto_panorama) if foto_panorama else None,
+        datetime.now().isoformat(), turno_id
     ))
     conn.commit()
-    return cur.lastrowid
+    return cur.lastrowid, foto.name
 
 
 def crear_turno(conn: sqlite3.Connection, vehiculo: str, operador: str) -> str:
@@ -219,8 +229,8 @@ def sincronizar_con_servidor(conn: sqlite3.Connection):
                     return base64.b64encode(f.read()).decode("utf-8")
             return None
 
-        foto_b64      = _leer_foto("foto_path")
-        panorama_b64  = _leer_foto("foto_panorama_path")
+        foto_b64     = _leer_foto("foto_path")
+        panorama_b64 = _leer_foto("foto_panorama_path")
 
         import struct
 
@@ -354,6 +364,46 @@ def color_por_severidad(severidad: str):
             "moderado": (0,165,255), "leve": (0,200,0)}.get(severidad, (255,255,255))
 
 
+def iou_cajas(a, b) -> float:
+    """Intersection over Union entre dos bboxes (x1,y1,x2,y2)."""
+    xi1 = max(a[0], b[0]); yi1 = max(a[1], b[1])
+    xi2 = min(a[2], b[2]); yi2 = min(a[3], b[3])
+    inter = max(0, xi2 - xi1) * max(0, yi2 - yi1)
+    if inter == 0:
+        return 0.0
+    area_a = (a[2]-a[0]) * (a[3]-a[1])
+    area_b = (b[2]-b[0]) * (b[3]-b[1])
+    return inter / (area_a + area_b - inter)
+
+
+def confirmado_por_segundo_modelo(modelo2, roi_small, escala, roi_y,
+                                   box_original, conf_min=0.20) -> bool:
+    """Retorna True si el segundo modelo también detecta algo en la misma zona.
+
+    Estrategia: el centro del bbox de M1 debe caer dentro del bbox de M2
+    (con margen). Esto es robusto cuando los dos modelos generan bboxes
+    de tamaños muy distintos pero apuntan al mismo objeto.
+    """
+    try:
+        res2 = modelo2.predict(roi_small, conf=conf_min, iou=0.45,
+                               verbose=False, device="cuda")
+        if not res2 or res2[0].boxes is None or len(res2[0].boxes) == 0:
+            return False
+        x1o, y1o, x2o, y2o = box_original
+        # Centro de la detección de M1 en coordenadas de roi_small
+        cx = int((x1o + x2o) / 2 * escala)
+        cy = int(((y1o + y2o) / 2 - roi_y) * escala)
+        margen = 50  # tolerancia en píxeles (roi_small es 640px)
+        for b2 in res2[0].boxes.xyxy.cpu().numpy():
+            bx1, by1, bx2, by2 = int(b2[0]), int(b2[1]), int(b2[2]), int(b2[3])
+            if (bx1 - margen <= cx <= bx2 + margen and
+                    by1 - margen <= cy <= by2 + margen):
+                return True
+        return False
+    except Exception:
+        return True   # si falla el segundo modelo, no bloqueamos
+
+
 # ══════════════════════════════════════════════════════════════════
 #  LOOP PRINCIPAL DE DETECCIÓN
 # ══════════════════════════════════════════════════════════════════
@@ -361,13 +411,23 @@ def color_por_severidad(severidad: str):
 def detectar(video_path: str, output_path: str, mostrar: bool,
              vehiculo: str, operador: str):
 
-    # Cargar modelo
+    # Cargar modelos (ensemble: ambos deben coincidir para confirmar un bache)
     if Path(MODELO_LOCAL).exists():
-        print(f"[MODELO] Cargando modelo propio: {MODELO_LOCAL}")
+        print(f"[MODELO 1] Cargando modelo propio: {MODELO_LOCAL}")
         modelo = YOLO(MODELO_LOCAL)
     else:
-        print(f"[MODELO] Descargando desde HuggingFace...")
+        print(f"[MODELO 1] Descargando desde HuggingFace...")
         modelo = YOLO(hf_hub_download(MODELO_REPO, MODELO_ARCHIVO))
+
+    try:
+        print(f"[MODELO 2] Cargando modelo HuggingFace (validador)...")
+        modelo2 = YOLO(hf_hub_download(MODELO_REPO, MODELO_ARCHIVO))
+        usar_ensemble = True
+        print(f"[ENSEMBLE] Activo — ambos modelos deben coincidir para guardar un bache")
+    except Exception as e:
+        print(f"[ENSEMBLE] No disponible ({e}) — usando solo modelo 1")
+        modelo2       = None
+        usar_ensemble = False
 
     # Iniciar GPS
     gps = crear_gps(GPS_MODO, GPS_PUERTO)
@@ -390,12 +450,15 @@ def detectar(video_path: str, output_path: str, mostrar: bool,
             output_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (ancho, alto)
         )
 
-    tracked               = {}
-    guardados_sin_tracker = []
-    baches_total          = 0
+    tracked          = {}
+    pendientes_st    = []   # buffer para sin_tracker: acumular y guardar al salir
+    baches_recientes = []   # (cx, cy, frame_idx) — dedup visual dentro de la corrida
+    baches_gps_guardados = []  # (lat, lon) — dedup GPS extra
+    baches_total     = 0
     frame_idx             = 0
     roi_y        = int(alto * ROI_INICIO)
     ultimas_dets = []
+    DIST_MISMO_BACHE_PX = 200  # px — distancia para considerar misma detección sin tracker
 
     print("Procesando... (q = salir | s = sincronizar ahora)\n")
 
@@ -444,28 +507,56 @@ def detectar(video_path: str, output_path: str, mostrar: bool,
                     if not es_bache_valido(frame, x1, y1, x2, y2):
                         continue
 
+                    # Ensemble: solo validar con M2 cuando M1 tiene baja confianza
+                    # Si M1 ya supera 0.68 lo consideramos confiable solo
+                    if usar_ensemble and conf < 0.68 and not confirmado_por_segundo_modelo(
+                        modelo2, roi_small, escala, roi_y, (x1, y1, x2, y2)
+                    ):
+                        continue
+
                     sin_tracker = boxes.id is None
                     track_id    = -(frame_idx * 100 + i) if sin_tracker else int(boxes.id[i])
 
-                    # Sin tracker: guardar solo si no hay un bache reciente cerca
+                    # ── Sin tracker: NO guardar inmediatamente, acumular en buffer ──
                     if sin_tracker and conf >= 0.58 and coord is not None:
                         cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-                        ya_guardado = any(
-                            abs(cx - px) < 80 and abs(cy - py) < 80
-                            and (frame_idx - pf) < 30
-                            for px, py, pf in guardados_sin_tracker
-                        )
-                        if not ya_guardado:
-                            baches_total += 1
-                            bid = guardar_bache(conn, coord, frame, x1, y1, x2, y2, conf, turno_id)
-                            sev = calcular_severidad(conf, x2-x1, y2-y1)
-                            guardados_sin_tracker.append((cx, cy, frame_idx))
-                            print(f"  ✓ Bache #{bid} (sin tracker) | {sev.upper()} {conf:.0%} "
-                                  f"| GPS ({coord.latitud:.6f}, {coord.longitud:.6f})")
-                            nuevas_dets.append({
-                                "bbox": (x1, y1, x2, y2), "conf": conf,
-                                "track_id": track_id, "severidad": sev,
+
+                        # Buscar si ya hay un pendiente cercano (mismo bache acercándose)
+                        encontrado = False
+                        for p in pendientes_st:
+                            dx = abs(cx - p["cx"])
+                            dy_ok = (cy >= p["cy"]) or (abs(cy - p["cy"]) < DIST_MISMO_BACHE_PX)
+                            if dx < DIST_MISMO_BACHE_PX and dy_ok:
+                                # Actualizar: mover posición y guardar mejor foto
+                                p["cx"] = cx
+                                p["cy"] = cy
+                                p["ultimo_frame"] = frame_idx
+                                p["visto"] += 1
+                                if conf > p["mejor_conf"]:
+                                    p["mejor_conf"]  = conf
+                                    p["mejor_frame"] = frame.copy()
+                                    p["mejor_bbox"]  = (x1, y1, x2, y2)
+                                    p["mejor_coord"] = coord
+                                encontrado = True
+                                break
+
+                        if not encontrado:
+                            # Nuevo bache pendiente
+                            pendientes_st.append({
+                                "cx": cx, "cy": cy,
+                                "ultimo_frame": frame_idx,
+                                "mejor_conf": conf,
+                                "mejor_frame": frame.copy(),
+                                "mejor_bbox": (x1, y1, x2, y2),
+                                "mejor_coord": coord,
+                                "visto": 1,
                             })
+
+                        sev = calcular_severidad(conf, x2-x1, y2-y1)
+                        nuevas_dets.append({
+                            "bbox": (x1, y1, x2, y2), "conf": conf,
+                            "track_id": track_id, "severidad": sev,
+                        })
                         continue
 
                     if track_id not in tracked:
@@ -484,26 +575,99 @@ def detectar(video_path: str, output_path: str, mostrar: bool,
                         t["mejor_bbox"]  = (x1, y1, x2, y2)
                         t["mejor_coord"] = coord
 
-                    if t["frames_visto"] >= FRAMES_CONFIRM and not t["guardado"]:
-                        if t["mejor_frame"] is not None and t["mejor_coord"] is not None:
-                            baches_total += 1
-                            bx1, by1, bx2, by2 = t["mejor_bbox"]
-                            bid = guardar_bache(
-                                conn, t["mejor_coord"],
-                                t["mejor_frame"], bx1, by1, bx2, by2,
-                                t["mejor_conf"], turno_id
-                            )
-                            sev = calcular_severidad(t["mejor_conf"], bx2-bx1, by2-by1)
-                            c   = t["mejor_coord"]
-                            print(f"  ✓ Bache #{bid} | {sev.upper()} {t['mejor_conf']:.0%} "
-                                  f"| GPS ({c.latitud:.6f}, {c.longitud:.6f})")
-                            t["guardado"] = True
+                    # NO guardar todavía — solo marcar confirmado.
+                    # Se guarda cuando el track_id desaparezca del frame.
+                    if t["frames_visto"] >= FRAMES_CONFIRM:
+                        t["confirmado"] = True
 
                     sev  = calcular_severidad(conf, x2-x1, y2-y1)
                     nuevas_dets.append({
                         "bbox": (x1, y1, x2, y2), "conf": conf,
                         "track_id": track_id, "severidad": sev,
                     })
+
+            # ── Flush: guardar baches confirmados que ya salieron de la pantalla ──
+            ids_en_pantalla = {d["track_id"] for d in nuevas_dets}
+            for tid, t in list(tracked.items()):
+                if tid in ids_en_pantalla:
+                    continue  # sigue en pantalla, no guardar aún
+                if not t.get("confirmado") or t["guardado"]:
+                    continue  # no confirmado o ya guardado
+                if t["mejor_frame"] is None or t["mejor_coord"] is None:
+                    t["guardado"] = True
+                    continue
+
+                bx1, by1, bx2, by2 = t["mejor_bbox"]
+                tcx, tcy = (bx1 + bx2) // 2, (by1 + by2) // 2
+
+                # Dedup por píxeles
+                ya_guardado = any(
+                    (
+                        (abs(tcx - px) < 120 and tcy >= py)
+                        or (abs(tcx - px) < 120 and abs(tcy - py) < 400)
+                    )
+                    and (frame_idx - pf) < 450
+                    for px, py, pf in baches_recientes
+                )
+                # Dedup GPS extra
+                if not ya_guardado and t["mejor_coord"] is not None:
+                    mc = t["mejor_coord"]
+                    for glat, glon in baches_gps_guardados:
+                        if haversine_m(mc.latitud, mc.longitud, glat, glon) < RADIO_DEDUP_LOCAL_M:
+                            ya_guardado = True
+                            break
+
+                if not ya_guardado:
+                    baches_total += 1
+                    bid, foto_name = guardar_bache(
+                        conn, t["mejor_coord"],
+                        t["mejor_frame"], bx1, by1, bx2, by2,
+                        t["mejor_conf"], turno_id
+                    )
+                    sev = calcular_severidad(t["mejor_conf"], bx2-bx1, by2-by1)
+                    c   = t["mejor_coord"]
+                    baches_recientes.append((tcx, tcy, frame_idx))
+                    if c is not None:
+                        baches_gps_guardados.append((c.latitud, c.longitud))
+                    print(f"  ✓ Bache #{bid} | {sev.upper()} {t['mejor_conf']:.0%} "
+                          f"| GPS ({c.latitud:.6f}, {c.longitud:.6f}) | {foto_name}")
+                t["guardado"] = True
+
+            # ── Flush pendientes sin tracker: guardar los que ya salieron de pantalla ──
+            pendientes_vivos = []
+            for p in pendientes_st:
+                frames_sin_ver = frame_idx - p["ultimo_frame"]
+                if frames_sin_ver < 30:
+                    pendientes_vivos.append(p)  # aún podría reaparecer
+                    continue
+
+
+                mc = p["mejor_coord"]
+                # Dedup GPS
+                ya_guardado = False
+                if mc is not None:
+                    for glat, glon in baches_gps_guardados:
+                        if haversine_m(mc.latitud, mc.longitud, glat, glon) < RADIO_DEDUP_LOCAL_M:
+                            ya_guardado = True
+                            break
+
+                if not ya_guardado:
+                    bx1, by1, bx2, by2 = p["mejor_bbox"]
+                    baches_total += 1
+                    bid, foto_name = guardar_bache(
+                        conn, mc,
+                        p["mejor_frame"], bx1, by1, bx2, by2,
+                        p["mejor_conf"], turno_id
+                    )
+                    sev = calcular_severidad(p["mejor_conf"], bx2-bx1, by2-by1)
+                    tcx, tcy = (bx1 + bx2) // 2, (by1 + by2) // 2
+                    baches_recientes.append((tcx, tcy, frame_idx))
+                    if mc is not None:
+                        baches_gps_guardados.append((mc.latitud, mc.longitud))
+                    print(f"  ✓ Bache #{bid} (sin tracker) | {sev.upper()} {p['mejor_conf']:.0%} "
+                          f"| visto {p['visto']}x | {foto_name}")
+
+            pendientes_st = pendientes_vivos
 
             ultimas_dets = nuevas_dets
 
@@ -556,6 +720,51 @@ def detectar(video_path: str, output_path: str, mostrar: bool,
                 while True:
                     if cv2.waitKey(100) & 0xFF == ord("p"):
                         break
+
+    # ── Flush final: guardar todo lo que quedó en buffers ──────────
+    # Pendientes sin tracker
+    for p in pendientes_st:
+        mc = p["mejor_coord"]
+        ya_guardado = False
+        if mc is not None:
+            for glat, glon in baches_gps_guardados:
+                if haversine_m(mc.latitud, mc.longitud, glat, glon) < RADIO_DEDUP_LOCAL_M:
+                    ya_guardado = True
+                    break
+        if not ya_guardado:
+            bx1, by1, bx2, by2 = p["mejor_bbox"]
+            baches_total += 1
+            bid, foto_name = guardar_bache(
+                conn, mc, p["mejor_frame"], bx1, by1, bx2, by2,
+                p["mejor_conf"], turno_id
+            )
+            sev = calcular_severidad(p["mejor_conf"], bx2-bx1, by2-by1)
+            if mc is not None:
+                baches_gps_guardados.append((mc.latitud, mc.longitud))
+            print(f"  ✓ Bache #{bid} (final) | {sev.upper()} {p['mejor_conf']:.0%} | {foto_name}")
+
+    # Tracked con tracker que no se guardaron
+    for tid, t in tracked.items():
+        if t.get("confirmado") and not t["guardado"]:
+            if t["mejor_frame"] is not None and t["mejor_coord"] is not None:
+                mc = t["mejor_coord"]
+                ya_guardado = False
+                for glat, glon in baches_gps_guardados:
+                    if haversine_m(mc.latitud, mc.longitud, glat, glon) < RADIO_DEDUP_LOCAL_M:
+                        ya_guardado = True
+                        break
+                if not ya_guardado:
+                    bx1, by1, bx2, by2 = t["mejor_bbox"]
+                    baches_total += 1
+                    bid, foto_name = guardar_bache(
+                        conn, mc, t["mejor_frame"], bx1, by1, bx2, by2,
+                        t["mejor_conf"], turno_id
+                    )
+                    sev = calcular_severidad(t["mejor_conf"], bx2-bx1, by2-by1)
+                    if mc is not None:
+                        baches_gps_guardados.append((mc.latitud, mc.longitud))
+                    print(f"  ✓ Bache #{bid} (final) | {sev.upper()} {t['mejor_conf']:.0%} | {foto_name}")
+                t["guardado"] = True
 
     # ── Cierre ──────────────────────────────────────────────────
     cap.release()

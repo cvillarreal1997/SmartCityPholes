@@ -14,7 +14,8 @@ from datetime import datetime
 Base = declarative_base()
 
 # Radio máximo para considerar que dos baches son el MISMO (metros)
-RADIO_DUPLICADO_M = 8.0
+# 35m cubre variación del simulador GPS; en producción con GPS real se puede bajar a 15m
+RADIO_DUPLICADO_M = 35.0
 
 
 def haversine_metros(lat1, lon1, lat2, lon2) -> float:

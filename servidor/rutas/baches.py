@@ -273,16 +273,14 @@ def obtener_foto(bache_id: int, db: Session = Depends(get_db)):
 
 @router.get("/{bache_id}/panorama")
 def obtener_panorama(bache_id: int, db: Session = Depends(get_db)):
-    """Retorna el frame completo con el bache marcado (panorama)."""
     bache = db.query(Bache).filter(Bache.id == bache_id).first()
     if not bache:
         raise HTTPException(404, "Bache no encontrado")
     if bache.foto_path:
-        # panorama = mismo nombre pero con sufijo _panorama
-        panorama = Path(bache.foto_path).with_suffix("").as_posix() + "_panorama.jpg"
-        # también buscar en fotos_servidor si el path apunta a otra carpeta
         panorama_local = FOTOS_DIR / (Path(bache.foto_path).stem + "_panorama.jpg")
-        for ruta in [panorama, str(panorama_local)]:
+        panorama_orig  = Path(bache.foto_path).with_suffix("").as_posix() + "_panorama.jpg"
+        for ruta in [str(panorama_local), panorama_orig]:
             if Path(ruta).exists():
                 return FileResponse(ruta, media_type="image/jpeg")
     raise HTTPException(404, "Panorama no disponible")
+

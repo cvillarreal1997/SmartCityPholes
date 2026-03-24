@@ -312,9 +312,9 @@ function actualizarMapa(puntosCalor, features) {
 
 function popupHTML(p) {
   const fecha    = p.fecha ? new Date(p.fecha).toLocaleString('es-EC') : '—';
-  const fotoUrl  = `${API}/api/baches/${p.id}/foto`;
-  const infoZoom = `Bache #${p.id} | ${(p.severidad||'').toUpperCase()} | ${fecha}`;
+  const fotoUrl     = `${API}/api/baches/${p.id}/foto`;
   const panoramaUrl = `${API}/api/baches/${p.id}/panorama`;
+  const infoZoom    = `Bache #${p.id} | ${(p.severidad||'').toUpperCase()} | ${fecha}`;
   const fotoHTML = p.tiene_foto
     ? `<img src="${fotoUrl}"
             class="popup-foto"
