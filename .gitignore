@@ -1,0 +1,49 @@
+# Modelos entrenados (archivos grandes)
+*.pt
+*.pth
+*.onnx
+*.weights
+
+# Bases de datos locales
+*.db
+*.sqlite
+*.sqlite3
+
+# Fotos y videos capturados
+servidor/fotos_servidor/
+vehiculo/fotos/
+videos/
+output/
+frames_para_etiquetar/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Entornos virtuales
+venv/
+env/
+.env
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Claude Code
+.claude/

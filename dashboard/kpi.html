@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>KPIs — Sistema Vial Municipal</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Segoe UI',sans-serif; background:#0f1923; color:#e0e0e0; }
+
+    header {
+      height:56px; background:#1a3a5c;
+      display:flex; align-items:center; justify-content:space-between;
+      padding:0 24px; box-shadow:0 2px 8px rgba(0,0,0,.4); position:relative; z-index:100;
+    }
+    header h1 { font-size:1.1rem; color:#fff; }
+    .nav-links a {
+      color:#90bfdf; text-decoration:none; margin-left:20px;
+      font-size:.85rem; padding:6px 12px; border-radius:4px; transition:background .2s;
+    }
+    .nav-links a:hover,.nav-links a.active { background:#2e6da4; color:#fff; }
+
+    .page { padding:24px; max-width:1400px; margin:0 auto; }
+
+    /* ── KPI Cards grandes ── */
+    .kpi-grid {
+      display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+      gap:16px; margin-bottom:28px;
+    }
+    .kpi-card {
+      background:#152536; border-radius:12px; padding:20px;
+      text-align:center; border-top:4px solid #2e6da4;
+      box-shadow:0 2px 8px rgba(0,0,0,.3);
+    }
+    .kpi-card.card-critico  { border-color:#ef5350; }
+    .kpi-card.card-ok       { border-color:#66bb6a; }
+    .kpi-card.card-warn     { border-color:#ffa726; }
+    .kpi-card.card-info     { border-color:#4fc3f7; }
+    .kpi-valor  { font-size:2.2rem; font-weight:700; color:#4fc3f7; line-height:1.1; }
+    .kpi-card.card-critico .kpi-valor { color:#ef5350; }
+    .kpi-card.card-ok       .kpi-valor { color:#66bb6a; }
+    .kpi-card.card-warn     .kpi-valor { color:#ffa726; }
+    .kpi-etiqueta { font-size:.8rem; color:#7fa8c4; margin-top:6px; }
+    .kpi-sub      { font-size:.7rem; color:#4a6a80; margin-top:4px; }
+
+    /* ── Barra de progreso ── */
+    .progreso-wrap { background:#152536; border-radius:12px; padding:20px; margin-bottom:28px; }
+    .progreso-wrap h2 { font-size:.9rem; color:#90bfdf; margin-bottom:14px; text-transform:uppercase; letter-spacing:.07em; }
+    .barra-container { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
+    .barra-label  { width:110px; font-size:.8rem; color:#7fa8c4; text-align:right; }
+    .barra-outer  { flex:1; background:#1e3a52; border-radius:999px; height:18px; overflow:hidden; }
+    .barra-inner  { height:100%; border-radius:999px; transition:width .6s ease; }
+    .barra-valor  { width:60px; font-size:.8rem; font-weight:600; }
+
+    /* ── Gráficos ── */
+    .graficos-grid {
+      display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:28px;
+    }
+    .grafico-card {
+      background:#152536; border-radius:12px; padding:20px;
+    }
+    .grafico-card h2 { font-size:.9rem; color:#90bfdf; margin-bottom:16px;
+                       text-transform:uppercase; letter-spacing:.07em; }
+    .grafico-card canvas { max-height:240px; }
+
+    /* ── Tabla resumen ── */
+    .tabla-wrap { background:#152536; border-radius:12px; padding:20px; margin-bottom:28px; }
+    .tabla-wrap h2 { font-size:.9rem; color:#90bfdf; margin-bottom:14px; text-transform:uppercase; letter-spacing:.07em; }
+    table { width:100%; border-collapse:collapse; }
+    th { background:#1e3a52; color:#90bfdf; padding:10px 14px; text-align:left; font-size:.78rem; font-weight:600; text-transform:uppercase; }
+    td { padding:10px 14px; font-size:.82rem; border-bottom:1px solid #1e3a52; }
+    tr:hover td { background:#1a2e42; }
+    .badge {
+      display:inline-block; padding:2px 10px; border-radius:999px;
+      font-size:.7rem; font-weight:700; color:#fff;
+    }
+    .badge-critico  { background:#ef5350; }
+    .badge-grave    { background:#ff7043; }
+    .badge-moderado { background:#ffa726; color:#000; }
+    .badge-leve     { background:#66bb6a; color:#000; }
+    .badge-nuevo    { background:#2196f3; }
+    .badge-en_reparacion { background:#ff9800; }
+    .badge-reparado { background:#4caf50; }
+
+    /* ── Botones ── */
+    .acciones { display:flex; gap:12px; margin-bottom:24px; flex-wrap:wrap; }
+    .btn {
+      padding:10px 20px; border:none; border-radius:8px; cursor:pointer;
+      font-weight:600; font-size:.85rem; transition:filter .2s;
+    }
+    .btn:hover { filter:brightness(1.15); }
+    .btn-excel  { background:#217346; color:#fff; }
+    .btn-reload { background:#2e6da4; color:#fff; }
+    .btn-poa    { background:#6a1b9a; color:#fff; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width:5px; }
+    ::-webkit-scrollbar-track { background:#0f1923; }
+    ::-webkit-scrollbar-thumb { background:#2e6da4; border-radius:3px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>📊 Panel de Indicadores — Sistema Vial Municipal</h1>
+  <nav class="nav-links">
+    <a href="/">Mapa</a>
+    <a href="/kpi" class="active">KPIs</a>
+    <a href="/api/docs" target="_blank">API</a>
+  </nav>
+</header>
+
+<div class="page">
+
+  <!-- Acciones -->
+  <div class="acciones">
+    <button class="btn btn-reload" onclick="cargarTodo()">↻ Actualizar datos</button>
+    <button class="btn btn-excel"  onclick="exportarExcel()">⬇ Exportar Excel</button>
+    <button class="btn btn-poa"    onclick="verResumenPOA()">📋 Resumen POA</button>
+  </div>
+
+  <!-- KPI Cards -->
+  <div class="kpi-grid">
+    <div class="kpi-card card-info">
+      <div class="kpi-valor" id="k-total">—</div>
+      <div class="kpi-etiqueta">Baches detectados</div>
+      <div class="kpi-sub">Total acumulado</div>
+    </div>
+    <div class="kpi-card card-ok">
+      <div class="kpi-valor" id="k-reparados">—</div>
+      <div class="kpi-etiqueta">Reparados</div>
+      <div class="kpi-sub" id="k-pct-rep">—% de resolución</div>
+    </div>
+    <div class="kpi-card card-warn">
+      <div class="kpi-valor" id="k-pendientes">—</div>
+      <div class="kpi-etiqueta">Pendientes</div>
+      <div class="kpi-sub">Requieren atención</div>
+    </div>
+    <div class="kpi-card card-critico">
+      <div class="kpi-valor" id="k-criticos">—</div>
+      <div class="kpi-etiqueta">Críticos activos</div>
+      <div class="kpi-sub">Prioridad inmediata</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-valor" id="k-costo">—</div>
+      <div class="kpi-etiqueta">Costo estimado</div>
+      <div class="kpi-sub">Para reparar pendientes</div>
+    </div>
+  </div>
+
+  <!-- Barras de progreso por severidad -->
+  <div class="progreso-wrap">
+    <h2>Distribución por severidad</h2>
+    <div id="barras-severidad"></div>
+  </div>
+
+  <!-- Gráficos -->
+  <div class="graficos-grid">
+    <div class="grafico-card">
+      <h2>Baches por severidad</h2>
+      <canvas id="grafSeveridad"></canvas>
+    </div>
+    <div class="grafico-card">
+      <h2>Estado actual</h2>
+      <canvas id="grafEstado"></canvas>
+    </div>
+  </div>
+
+  <!-- Tabla -->
+  <div class="tabla-wrap">
+    <h2>Últimos 50 baches registrados</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th><th>Fecha</th><th>Severidad</th><th>Confianza</th>
+          <th>Zona</th><th>Estado</th><th>Costo est.</th><th>Coordenadas</th>
+        </tr>
+      </thead>
+      <tbody id="tabla-body"></tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+const API = '';
+let grafSev, grafEst;
+
+async function cargarTodo() {
+  const [stats, geojson] = await Promise.all([
+    fetch(`${API}/api/baches/estadisticas`).then(r => r.json()),
+    fetch(`${API}/api/baches?limit=50`).then(r => r.json()),
+  ]);
+  actualizarKpis(stats);
+  actualizarGraficos(stats);
+  actualizarTabla(geojson.features || []);
+}
+
+function actualizarKpis(s) {
+  document.getElementById('k-total').textContent     = s.total ?? '—';
+  document.getElementById('k-reparados').textContent = s.reparados ?? '—';
+  document.getElementById('k-pendientes').textContent= s.pendientes ?? '—';
+  document.getElementById('k-criticos').textContent  = s.criticos_activos ?? '—';
+  document.getElementById('k-costo').textContent     =
+    '$' + (s.costo_estimado_total || 0).toLocaleString('es-EC', {maximumFractionDigits:0});
+  document.getElementById('k-pct-rep').textContent   =
+    `${s.pct_resolucion ?? 0}% de resolución`;
+
+  // Barras de severidad
+  const sev    = s.por_severidad || {};
+  const total  = s.total || 1;
+  const config = [
+    { key:'critico',  label:'Crítico',  color:'#ef5350' },
+    { key:'grave',    label:'Grave',    color:'#ff7043' },
+    { key:'moderado', label:'Moderado', color:'#ffa726' },
+    { key:'leve',     label:'Leve',     color:'#66bb6a' },
+  ];
+  document.getElementById('barras-severidad').innerHTML = config.map(c => {
+    const n   = sev[c.key] || 0;
+    const pct = Math.round(n / total * 100);
+    return `
+      <div class="barra-container">
+        <span class="barra-label">${c.label}</span>
+        <div class="barra-outer">
+          <div class="barra-inner" style="width:${pct}%;background:${c.color}"></div>
+        </div>
+        <span class="barra-valor" style="color:${c.color}">${n} (${pct}%)</span>
+      </div>`;
+  }).join('');
+}
+
+function actualizarGraficos(s) {
+  const sevData   = s.por_severidad || {};
+  const estadoData= s.por_estado    || {};
+  const colSev    = ['#ef5350','#ff7043','#ffa726','#66bb6a'];
+  const colEst    = ['#2196f3','#ff9800','#4caf50'];
+
+  // Gráfico severidad
+  if (grafSev) grafSev.destroy();
+  grafSev = new Chart(document.getElementById('grafSeveridad'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Crítico','Grave','Moderado','Leve'],
+      datasets: [{ data: [sevData.critico||0, sevData.grave||0, sevData.moderado||0, sevData.leve||0],
+                   backgroundColor: colSev, borderWidth: 2, borderColor: '#152536' }]
+    },
+    options: {
+      plugins: { legend: { labels: { color:'#e0e0e0', font:{size:12} } } },
+      cutout: '60%',
+    }
+  });
+
+  // Gráfico estado
+  if (grafEst) grafEst.destroy();
+  const estLabels = Object.keys(estadoData);
+  grafEst = new Chart(document.getElementById('grafEstado'), {
+    type: 'bar',
+    data: {
+      labels: estLabels.map(l => l.replace('_',' ').replace(/\b\w/g, c => c.toUpperCase())),
+      datasets: [{
+        label: 'Baches',
+        data: estLabels.map(k => estadoData[k] || 0),
+        backgroundColor: ['#2196f3','#ff9800','#4caf50','#9c27b0'],
+        borderRadius: 6,
+      }]
+    },
+    options: {
+      plugins: { legend: { display:false } },
+      scales: {
+        x: { ticks: { color:'#90bfdf' }, grid: { color:'#1e3a52' } },
+        y: { ticks: { color:'#90bfdf' }, grid: { color:'#1e3a52' }, beginAtZero:true },
+      }
+    }
+  });
+}
+
+function actualizarTabla(features) {
+  document.getElementById('tabla-body').innerHTML = features.map(f => {
+    const p     = f.properties;
+    const fecha = p.fecha ? new Date(p.fecha).toLocaleString('es-EC') : '—';
+    return `<tr>
+      <td>#${p.id}</td>
+      <td>${fecha}</td>
+      <td><span class="badge badge-${p.severidad}">${(p.severidad||'').toUpperCase()}</span></td>
+      <td>${((p.confianza||0)*100).toFixed(1)}%</td>
+      <td>${p.zona || '—'}</td>
+      <td><span class="badge badge-${p.estado}">${(p.estado||'').replace('_',' ')}</span></td>
+      <td>$${(p.costo_estimado||0).toFixed(2)}</td>
+      <td style="font-family:monospace;font-size:.75rem">${(p.latitud||0).toFixed(5)}, ${(p.longitud||0).toFixed(5)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function exportarExcel() {
+  window.open(`${API}/api/reportes/excel`, '_blank');
+}
+
+async function verResumenPOA() {
+  const data = await fetch(`${API}/api/reportes/resumen-poa`).then(r => r.json());
+  const ind  = data.indicadores || {};
+  alert(
+    `RESUMEN POA — Sistema Vial Municipal\n\n` +
+    `Total detectados : ${ind.total_baches_detectados}\n` +
+    `Reparados        : ${ind.baches_reparados}\n` +
+    `Pendientes       : ${ind.baches_pendientes}\n` +
+    `% Resolución     : ${ind.porcentaje_resolucion}\n` +
+    `Costo estimado   : $${ind.costo_estimado_total_usd}\n` +
+    `Zona más afectada: ${ind.zona_mas_afectada}\n\n` +
+    `Meta: ${data.meta_sugerida}`
+  );
+}
+
+cargarTodo();
+setInterval(cargarTodo, 60_000);
+</script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+# ═══════════════════════════════════════════════════════
+#  Sistema de Gestión Vial Municipal — Dependencias
+# ═══════════════════════════════════════════════════════
+
+# ── Detección de baches (vehículo) ──────────────────────
+ultralytics>=8.0.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+huggingface-hub>=0.20.0
+
+# ── GPS (vehículo) ───────────────────────────────────────
+pyserial>=3.5          # comunicación serial con módulo GPS
+pynmea2>=1.19.0        # parser de tramas NMEA
+
+# ── Sincronización con servidor ──────────────────────────
+requests>=2.31.0
+
+# ── Servidor central (FastAPI) ───────────────────────────
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+sqlalchemy>=2.0.0
+pydantic>=2.0.0
+
+# ── Reportes ─────────────────────────────────────────────
+openpyxl>=3.1.0        # exportar Excel
+
+# ── Base de datos producción (opcional) ──────────────────
+# psycopg2-binary>=2.9.0   # PostgreSQL — descomentar para producción
