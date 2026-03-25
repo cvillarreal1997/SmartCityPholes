@@ -52,7 +52,7 @@ SERVIDOR_URL        = "http://localhost:8000"   # cambiar por IP del servidor
 
 # API key del vehículo — se obtiene al registrar el dispositivo en el servidor
 # Ejecutar una vez: POST /api/dispositivos  →  copiar api_key aquí
-DEVICE_API_KEY      = "41c89efe7bd85ff25d6df4ecf49a159538a8cb5368f3c2438fa3f09b1c054383"
+DEVICE_API_KEY      = "15308dc1d046017fab5f8deb48b7b6130e449f6bf3171a7ab718164496de6df8"
 
 # GPS: "simulador" para pruebas, "real" con hardware conectado
 GPS_MODO            = "simulador"
@@ -148,20 +148,19 @@ def guardar_bache(conn: sqlite3.Connection, coord: CoordenadaGPS,
     foto = FOTOS_DIR / f"bache_{ts}.jpg"
     cv2.imwrite(str(foto), recorte)
 
-    # ── Foto panorama (frame completo con bache marcado) ── DESACTIVADO TEMPORALMENTE
-    # panorama = frame.copy()
-    # cv2.rectangle(panorama, (x1, y1), (x2, y2), color, 3)
-    # cx_p, cy_p = (x1 + x2) // 2, y1
-    # cv2.arrowedLine(panorama, (cx_p, max(0, cy_p - 60)), (cx_p, cy_p), color, 3, tipLength=0.3)
-    # label = f"BACHE {severidad.upper()} {confianza:.0%}"
-    # (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
-    # lx = max(0, cx_p - tw // 2)
-    # ly = max(th + 4, cy_p - 68)
-    # cv2.rectangle(panorama, (lx-4, ly-th-4), (lx+tw+4, ly+4), color, -1)
-    # cv2.putText(panorama, label, (lx, ly), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
-    # foto_panorama = FOTOS_DIR / f"bache_{ts}_panorama.jpg"
-    # cv2.imwrite(str(foto_panorama), panorama)
-    foto_panorama = None
+    # ── Foto panorama (frame completo con bache marcado) ──────────
+    panorama = frame.copy()
+    cv2.rectangle(panorama, (x1, y1), (x2, y2), color, 3)
+    cx_p, cy_p = (x1 + x2) // 2, y1
+    cv2.arrowedLine(panorama, (cx_p, max(0, cy_p - 60)), (cx_p, cy_p), color, 3, tipLength=0.3)
+    label = f"BACHE {severidad.upper()} {confianza:.0%}"
+    (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
+    lx = max(0, cx_p - tw // 2)
+    ly = max(th + 4, cy_p - 68)
+    cv2.rectangle(panorama, (lx-4, ly-th-4), (lx+tw+4, ly+4), color, -1)
+    cv2.putText(panorama, label, (lx, ly), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
+    foto_panorama = FOTOS_DIR / f"bache_{ts}_panorama.jpg"
+    cv2.imwrite(str(foto_panorama), panorama)
 
     cur = conn.execute("""
         INSERT INTO baches
