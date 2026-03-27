@@ -16,6 +16,8 @@ from pathlib import Path
 from datetime import datetime
 from ultralytics import YOLO
 from huggingface_hub import hf_hub_download
+import torch
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 def haversine_m(lat1, lon1, lat2, lon2) -> float:
     """Distancia en metros entre dos coordenadas GPS."""
@@ -385,7 +387,7 @@ def confirmado_por_segundo_modelo(modelo2, roi_small, escala, roi_y,
     """
     try:
         res2 = modelo2.predict(roi_small, conf=conf_min, iou=0.45,
-                               verbose=False, device="cuda")
+                               verbose=False, device=DEVICE)
         if not res2 or res2[0].boxes is None or len(res2[0].boxes) == 0:
             return False
         x1o, y1o, x2o, y2o = box_original
@@ -484,7 +486,7 @@ def detectar(video_path: str, output_path: str, mostrar: bool,
             resultados = modelo.track(
                 roi_small, persist=True,
                 conf=CONFIANZA_MIN, iou=IOU_NMS, verbose=False,
-                device="cuda",
+                device=DEVICE,
             )
 
             nuevas_dets = []
