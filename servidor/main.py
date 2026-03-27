@@ -43,8 +43,9 @@ app.include_router(router_dispositivos)
 # ── Servir dashboard estático ────────────────────────────────────
 DASHBOARD_DIR = Path(__file__).parent.parent / "dashboard"
 if DASHBOARD_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(DASHBOARD_DIR / "static")),
-              name="static")
+    static_dir = DASHBOARD_DIR / "static"
+    static_dir.mkdir(exist_ok=True)   # crea la carpeta si no existe
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     @app.get("/", include_in_schema=False)
     def dashboard_mapa():
